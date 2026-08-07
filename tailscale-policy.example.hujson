@@ -1,0 +1,20 @@
+{
+  "groups": {
+    "group:beepy-users": [
+      "alice@your-domain.example",
+      "bob@your-domain.example"
+    ]
+  },
+
+  "tagOwners": {
+    "tag:beepy": ["autogroup:admin"]
+  },
+
+  "grants": [
+    {
+      "src": ["group:beepy-users"],
+      "dst": ["tag:beepy"],
+      "ip": ["tcp:443"]
+    }
+  ]
+}

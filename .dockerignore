@@ -1,0 +1,34 @@
+# Secrets
+.env
+.env.*
+
+# Git
+.git
+.gitignore
+
+# Manual/legacy backups
+backups/
+backend.backup-*/
+backend/app.backup-*/
+*.backup
+*.bak
+*.before-*
+
+# Runtime files
+logs/
+*.log
+data/
+uploads/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.before_*
