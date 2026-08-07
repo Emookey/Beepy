@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: int = 240
     ollama_context: int = 32768
 
+    odysseus_base_url: str
+    odysseus_endpoint_id: str
+    odysseus_ollama_base: str
+
     sync_interval_seconds: int = 900
     full_sync_on_empty: bool = True
     max_autotask_pages: int = 2000

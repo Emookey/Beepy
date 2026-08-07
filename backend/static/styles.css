@@ -10,3 +10,5 @@ button,textarea,select{font:inherit}.loading{min-height:100vh;display:grid;place
 @media(max-width:800px){.app,.app.collapsed{grid-template-columns:78px 1fr}.brand,.nav span,.history-head,.history{display:none}.nav{justify-content:center}.chat{padding:12px}.composer{width:calc(100% - 20px)}}
 
 .sources a{color:#72b5ff;text-decoration:none}.sources a:hover{text-decoration:underline}
+
+.composer select#mode{min-width:110px;font-weight:700}

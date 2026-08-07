@@ -11,6 +11,7 @@ from .db import SessionLocal, initialize_database
 from .models import Conversation, Message, SyncState, Ticket, TicketNote, RetrievalLog
 from .search import answer_tech_question, answer_ticket_question, search_tickets
 from .ollama import chat_stream
+from .odysseus import OdysseusError, answer_odysseus_tech
 from .autotask import AutotaskClient
 from .interpreter import interpret_question
 
@@ -126,6 +127,58 @@ def interpret_endpoint(
     return interpretation.to_dict()
 
 
+def _resolve_chat_mode(requested_mode: str, question: str, user_email: str) -> tuple[str, dict]:
+    """Resolve Auto before retrieval so tech questions never query tickets first."""
+    requested = (requested_mode or "auto").strip().lower()
+    if requested == "smart":
+        requested = "auto"  # backward compatibility with an older open tab
+    if requested in {"tickets", "tech"}:
+        return requested, {"requested": requested, "reason": "manual"}
+
+    interpretation = interpret_question(question=question, user_email=user_email)
+    lower = question.lower()
+    tech_leads = (
+        "how do i", "how can i", "how to", "why does", "why is",
+        "what causes", "troubleshoot", "not working", "cannot connect",
+        "can't connect", "error", "crashing", "freezing",
+    )
+    if any(term in lower for term in tech_leads):
+        return "tech", {
+            "requested": "auto",
+            "reason": "technical wording",
+            "interpretation": interpretation.to_dict(),
+        }
+
+    if interpretation.intent == "ticket_search":
+        return "tickets", {
+            "requested": "auto",
+            "reason": "ticket-history wording",
+            "interpretation": interpretation.to_dict(),
+        }
+
+    historical = any(term in lower for term in (
+        "worked", "done", "completed", "closed", "resolved", "created",
+        "assigned", "history", "previous", "past", "recent", "has had",
+        "have had", "did yesterday", "did today",
+    ))
+    if historical and (
+        interpretation.technician
+        or interpretation.company
+        or interpretation.date_from
+    ):
+        return "tickets", {
+            "requested": "auto",
+            "reason": "historical entity/date request",
+            "interpretation": interpretation.to_dict(),
+        }
+
+    return "tech", {
+        "requested": "auto",
+        "reason": "default technical question",
+        "interpretation": interpretation.to_dict(),
+    }
+
+
 @app.post("/api/chat")
 def chat_endpoint(body: ChatRequest, user: User = Depends(require_user)):
     question = body.question.strip()
@@ -166,30 +219,36 @@ def chat_endpoint(body: ChatRequest, user: User = Depends(require_user)):
         ))
         db.commit()
 
-    mode = body.mode.lower()
+    requested_mode = body.mode.lower()
+    mode, route_plan = _resolve_chat_mode(requested_mode, question, user.email)
     tickets = []
-    if mode in {"smart", "tickets"}:
+
+    if mode == "tickets":
         t0 = time.perf_counter()
         tickets = search_tickets(question)
         print(
-        f"Ticket search took "
-        f"{(time.perf_counter() - t0):.3f} seconds",
-        flush=True,
-   )
-
-    if mode == "tickets":
+            f"Ticket search took {(time.perf_counter() - t0):.3f} seconds",
+            flush=True,
+        )
         answer = answer_ticket_question(question, tickets, history)
-        engine = "autotask-hybrid"
-    elif mode == "tech":
-        answer = answer_tech_question(question, history)
-        engine = "qwen-tech"
+        engine = "autotask-hybrid" if tickets else "autotask-no-match"
     else:
-        if tickets:
-            answer = answer_ticket_question(question, tickets, history)
-            engine = "autotask-hybrid"
-        else:
-            answer = answer_tech_question(question, history)
-            engine = "qwen-tech-fallback"
+        try:
+            answer = answer_odysseus_tech(question, history)
+            engine = "odysseus-rag"
+        except OdysseusError as exc:
+            print(f"Odysseus tech fallback: {exc}", flush=True)
+            try:
+                answer = answer_tech_question(question, history)
+                engine = "local-qwen-fallback"
+            except Exception as fallback_exc:
+                print(f"Local tech fallback also failed: {fallback_exc}", flush=True)
+                answer = (
+                    "## Tech service unavailable\n\n"
+                    "Odysseus could not answer this request, and the local fallback model "
+                    "was also unavailable. Ticket Search is still available."
+                )
+                engine = "tech-unavailable"
 
     sources = [
         {
@@ -218,6 +277,7 @@ def chat_endpoint(body: ChatRequest, user: User = Depends(require_user)):
         "sources": sources,
         "engine": engine,
         "matchedTickets": len(tickets),
+        "resolvedMode": mode,
     }
 
 
@@ -263,9 +323,10 @@ def chat_stream_endpoint(body: ChatRequest, user: User = Depends(require_user)):
         db.commit()
         conversation_id = conversation.id
 
-    mode = body.mode.lower()
+    requested_mode = body.mode.lower()
+    mode, route_plan = _resolve_chat_mode(requested_mode, question, user.email)
     started = time.perf_counter()
-    tickets = search_tickets(question) if mode in {"smart", "tickets"} else []
+    tickets = search_tickets(question) if mode == "tickets" else []
 
     sources = [
         {
@@ -279,55 +340,36 @@ def chat_stream_endpoint(body: ChatRequest, user: User = Depends(require_user)):
     ]
 
     def event_stream():
-        answer_parts = []
-
-        if tickets:
-            engine = "autotask-exact"
-        elif mode == "tickets":
-            engine = "autotask-no-match"
+        if mode == "tickets":
+            engine = "autotask-exact" if tickets else "autotask-no-match"
+            answer = answer_ticket_question(question, tickets, history)
         else:
-            engine = "qwen-tech-stream"
+            try:
+                answer = answer_odysseus_tech(question, history)
+                engine = "odysseus-rag"
+            except OdysseusError as exc:
+                print(f"Odysseus tech fallback: {exc}", flush=True)
+                try:
+                    answer = answer_tech_question(question, history)
+                    engine = "local-qwen-fallback"
+                except Exception as fallback_exc:
+                    print(f"Local tech fallback also failed: {fallback_exc}", flush=True)
+                    answer = (
+                        "## Tech service unavailable\n\n"
+                        "Odysseus could not answer this request, and the local fallback model "
+                        "was also unavailable. Ticket Search is still available."
+                    )
+                    engine = "tech-unavailable"
 
         yield f"event: meta\ndata: {json.dumps({
             'conversationId': conversation_id,
             'sources': sources,
             'engine': engine,
             'matchedTickets': len(tickets),
+            'resolvedMode': mode,
         })}\n\n"
+        yield f"event: token\ndata: {json.dumps({'text': answer})}\n\n"
 
-        # Matching ticket requests never pass through Qwen. This makes them fast
-        # and prevents the model from rewriting exact Autotask fields.
-        if tickets:
-            answer = answer_ticket_question(question, tickets, history)
-            answer_parts.append(answer)
-            yield f"event: token\ndata: {json.dumps({'text': answer})}\n\n"
-        elif mode == "tickets":
-            answer = (
-                "## No matching Autotask tickets\n\n"
-                "I searched the synchronized Autotask index but did not find a match."
-            )
-            answer_parts.append(answer)
-            yield f"event: token\ndata: {json.dumps({'text': answer})}\n\n"
-        else:
-            tech_messages = [{
-                "role": "system",
-                "content": """ /no_think
-You are MBC - Beepy, a senior MSP support technician.
-Give technically accurate, practical troubleshooting guidance.
-Separate confirmed facts from likely causes, explain what each diagnostic step proves,
-and ask for missing product, version, error, or topology information when necessary.
-""",
-            }, *history[-8:], {"role": "user", "content": question}]
-            try:
-                for token in chat_stream(tech_messages, temperature=0.15):
-                    answer_parts.append(token)
-                    yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"
-            except Exception:
-                fallback = answer_tech_question(question, history)
-                answer_parts[:] = [fallback]
-                yield f"event: replace\ndata: {json.dumps({'text': fallback})}\n\n"
-
-        answer = "".join(answer_parts)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         with SessionLocal() as db:
             db.add(Message(
@@ -340,10 +382,14 @@ and ask for missing product, version, error, or topology information when necess
             db.add(RetrievalLog(
                 user_email=user.email,
                 question=question,
-                mode=mode,
+                mode=requested_mode,
                 engine=engine,
                 matched_ticket_ids=[ticket.id for ticket in tickets],
-                search_plan={"quantityControlledByRequest": True},
+                search_plan={
+                    "quantityControlledByRequest": True,
+                    "resolvedMode": mode,
+                    "route": route_plan,
+                },
                 elapsed_ms=elapsed_ms,
             ))
             db.commit()

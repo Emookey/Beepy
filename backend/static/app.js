@@ -1,7 +1,7 @@
 const app = document.getElementById("app");
 const state = {
   config:null, account:null, token:null, conversations:[], conversationId:null,
-  messages:[], mode:"smart", busy:false, status:null, collapsed:false
+  messages:[], mode:"auto", busy:false, status:null, collapsed:false
 };
 
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({
@@ -23,6 +23,16 @@ function randomString(length=64){
 function decodeJwt(token){
   try{return JSON.parse(atob(token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")))}
   catch{return {}}
+}
+function engineLabel(value){
+  return ({
+    "odysseus-rag":"Odysseus RAG · qwen2.5:3b-project",
+    "local-qwen-fallback":"Local Qwen fallback",
+    "tech-unavailable":"Tech service unavailable",
+    "autotask-exact":"Autotask tickets",
+    "autotask-hybrid":"Autotask tickets",
+    "autotask-no-match":"Autotask · no match"
+  })[value]||value;
 }
 function markdown(text){
   let s=esc(text);
@@ -106,10 +116,21 @@ async function activate(){
 function logout(){sessionStorage.clear();location.reload()}
 async function refresh(){
   if(!state.token)return;
+
   [state.conversations,state.status]=await Promise.all([
-    api("/api/conversations"),api("/api/status")
+    api("/api/conversations"),
+    api("/api/status")
   ]);
-  render();
+
+  // Background refresh must NEVER rebuild the entire UI.
+  // Rebuilding would destroy typed text and reset scroll position.
+  const statusElement=document.querySelector(".status");
+
+  if(statusElement&&state.status){
+    statusElement.textContent=
+      `${Number(state.status.tickets).toLocaleString()} tickets · `+
+      `${Number(state.status.notes).toLocaleString()} notes`;
+  }
 }
 async function openConversation(id){
   const data=await api(`/api/conversations/${id}`);
@@ -191,25 +212,45 @@ function renderLogin(){
   document.getElementById("login").onclick=beginLogin;
 }
 function render(){
+  // Preserve anything the user is doing before rebuilding the DOM.
+  const oldQuestion=document.getElementById("question");
+  const draft=oldQuestion?.value??"";
+  const selectionStart=oldQuestion?.selectionStart??draft.length;
+  const selectionEnd=oldQuestion?.selectionEnd??draft.length;
+  const questionHadFocus=document.activeElement===oldQuestion;
+
+  const oldChat=document.querySelector(".chat");
+  const oldScrollTop=oldChat?.scrollTop??0;
+
+  // Only automatically follow new messages if the user was already
+  // close to the bottom of the conversation.
+  const wasNearBottom=
+    !oldChat||
+    (
+      oldChat.scrollHeight-
+      oldChat.scrollTop-
+      oldChat.clientHeight
+    )<120;
+
   if(!state.account){renderLogin();return}
   const history=state.conversations.map(c=>`<button class="${c.id===state.conversationId?"selected":""}" data-conv="${c.id}" title="${esc(c.title)}">${esc(c.title)}</button>`).join("");
   const messages=state.messages.map(m=>`<article class="message ${m.role}">
     <div class="avatar">${m.role==="assistant"?"B":esc((state.account.name||"U")[0])}</div>
     <div class="bubble">${m.role==="assistant"?markdown(m.content):esc(m.content)}
     ${m.sources?.length?`<div class="sources">Sources: ${m.sources.map(s=>s.url?`<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.ticketNumber||s.title)}</a>`:esc(s.ticketNumber||s.title)).filter(Boolean).join(", ")}</div>`:""}
-    ${m.engine?`<div class="engine">${esc(m.engine)}${m.elapsedMs?` · ${(m.elapsedMs/1000).toFixed(1)}s`:""}</div>`:""}</div></article>`).join("");
-  const welcome=!state.messages.length?`<div class="welcome"><h1>What can Beepy help with?</h1><p>Search synchronized Autotask tickets or ask a technical question.</p><div class="quick"><button data-prompt="Show me recent VPN tickets">Recent VPN tickets</button><button data-prompt="Why would NetExtender authenticate but not receive an IP?">VPN troubleshooting</button></div></div>`:"";
+    ${m.engine?`<div class="engine">${esc(engineLabel(m.engine))}${m.elapsedMs?` · ${(m.elapsedMs/1000).toFixed(1)}s`:""}</div>`:""}</div></article>`).join("");
+  const welcome=!state.messages.length?`<div class="welcome"><h1>What can Beepy help with?</h1><p>Search Autotask tickets or use Odysseus RAG for technical support.</p><div class="quick"><button data-prompt="Show me recent VPN tickets">Recent VPN tickets</button><button data-prompt="Why would NetExtender authenticate but not receive an IP?">VPN troubleshooting</button></div></div>`:"";
   app.innerHTML=`<div class="app ${state.collapsed?"collapsed":""}">
     <aside class="sidebar"><button id="collapse" class="collapse">☰</button><div class="brand">MBC<span>INTELLIGENCE</span></div>
       <button id="home" class="nav active">⌂ <span>Home</span></button>
       <button id="new" class="nav">＋ <span>New chat</span></button>
       <div class="history-head"><span>Conversations</span><button id="new2">＋</button></div><div class="history">${history}</div>
       <button id="logout" class="nav signout">⇥ <span>Sign out</span></button></aside>
-    <main class="workspace"><header><div><h2>MBC - Beepy</h2><p>Autotask intelligence and technical support</p></div><div class="user"><b>${esc(state.account.name)}</b><span>${esc(state.account.email)}</span></div></header>
+    <main class="workspace"><header><div><h2>MBC - Beepy</h2><p>Autotask intelligence and Odysseus technical support</p></div><div class="user"><b>${esc(state.account.name)}</b><span>${esc(state.account.email)}</span></div></header>
       <section class="chat">${welcome}<div class="messages">${messages}${state.busy?'<article class="message assistant"><div class="avatar">B</div><div class="bubble typing">● ● ●</div></article>':""}<div id="end"></div></div></section>
       <section class="composer"><div class="status">${state.status?`${Number(state.status.tickets).toLocaleString()} tickets · ${Number(state.status.notes).toLocaleString()} notes`:"Index loading…"}</div>
-        <textarea id="question" placeholder="Ask about a client, ticket, technician, date, resolution, or technical issue…"></textarea>
-        <div class="composer-row"><select id="mode"><option value="smart">Smart: tickets first</option><option value="tickets">Ticket Search</option><option value="tech">Tech Chat</option></select><button id="send" class="send">➤</button></div></section>
+        <textarea id="question" placeholder="Ask about tickets or a technical issue…"></textarea>
+        <div class="composer-row"><select id="mode" aria-label="Beepy mode"><option value="auto">Auto</option><option value="tickets">Tickets</option><option value="tech">Tech</option></select><button id="send" class="send">➤</button></div></section>
     </main></div>`;
   document.getElementById("collapse").onclick=()=>{state.collapsed=!state.collapsed;render()};
   document.getElementById("home").onclick=newConversation;
@@ -222,7 +263,34 @@ function render(){
   document.getElementById("question").onkeydown=e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}};
   document.querySelectorAll("[data-conv]").forEach(b=>b.onclick=()=>openConversation(b.dataset.conv));
   document.querySelectorAll("[data-prompt]").forEach(b=>b.onclick=()=>{document.getElementById("question").value=b.dataset.prompt;document.getElementById("question").focus()});
-  document.getElementById("end")?.scrollIntoView();
+  // Restore unsent text after DOM recreation.
+  const newQuestion=document.getElementById("question");
+
+  if(newQuestion){
+    newQuestion.value=draft;
+
+    if(questionHadFocus){
+      newQuestion.focus({preventScroll:true});
+
+      try{
+        newQuestion.setSelectionRange(
+          selectionStart,
+          selectionEnd
+        );
+      }catch{}
+    }
+  }
+
+  // Preserve manual scrolling.
+  const newChat=document.querySelector(".chat");
+
+  if(newChat){
+    if(wasNearBottom){
+      newChat.scrollTop=newChat.scrollHeight;
+    }else{
+      newChat.scrollTop=oldScrollTop;
+    }
+  }
 }
 (async()=>{
   try{
