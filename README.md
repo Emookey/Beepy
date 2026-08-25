@@ -1,6 +1,8 @@
 # Beepy
 
-Beepy is Kalvin's business, ticket, project, and email intelligence application. This directory is an offline repository candidate derived from the Phase 2 canonical MBC Intelligence source. It has not been initialized as a Git repository and is not approved for production deployment.
+Beepy is Kalvin's business, ticket, project, and email intelligence application. This offline Git repository candidate is derived from the Phase 2 canonical MBC Intelligence source and is not approved for production deployment.
+
+Beepy originated as MBC Intelligence and was originally developed by Jerry Sandy.
 
 ## Identity
 
@@ -35,6 +37,7 @@ Runtime configuration must be externally provisioned. The source currently expec
 - Entra tenant/client settings and an allowed email domain
 - Autotask API settings
 - Ollama endpoints, model names, and retrieval controls
+- Odysseus compatibility endpoint settings
 - externally mounted Odysseus and email integration secret files
 - an external persistent project-upload location
 
@@ -67,7 +70,7 @@ The candidate intentionally retains legacy identifiers when renaming could affec
 - `beepy@mbc.local`, pending review of persisted project messages and API consumers
 - legacy operational script filenames
 
-See the parent Phase 2B `reports/` and `manifests/` directories for the compatibility contract, naming impact map, validation evidence, and source hashes.
+See the Phase 3E audit workspace reports and manifests for the compatibility contract, naming impact map, validation evidence, and source hashes.
 
 ## Promotion status
 

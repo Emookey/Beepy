@@ -32,7 +32,7 @@ def _odysseus_username(user_email: str) -> str:
         raise OdysseusError("Authenticated MBC user does not have a valid email address.")
 
     # MBC Entra accounts map to the corresponding Odysseus username.
-    # Example: alice@your-domain.example -> jerry
+    # Example: alex@your-domain.example -> alex
     username = email.split("@", 1)[0].strip()
 
     if not username:

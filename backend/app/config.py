@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     entra_client_id: str
     entra_tenant_id: str
     allowed_email_domain: str
+
     autotask_username: str
     autotask_secret: str
     autotask_integration_code: str
