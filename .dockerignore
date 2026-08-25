@@ -1,37 +1,68 @@
-# Secrets
+# Never send credentials or local configuration into the build context
 .env
 .env.*
+!.env.example
+secrets/
+**/secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
 
-# Git
-.git
-.gitignore
+# Runtime and persistent application state
+project_uploads/
+postgres_data/
+logs/
+*.log
+*.pid
+*.sock
+*.sqlite
+*.sqlite3
+*.db
 
-# Manual/legacy backups
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Historical copies and backup archives
 backups/
 backend.backup-*/
-backend/app.backup-*/
+**/app.backup-*/
 *.backup
 *.bak
 *.before-*
+*.before_*
+*.sql.gz
+*.dump
+*.backup.tar
+*.backup.tar.gz
+*.backup.tgz
+*.backup.zip
+*backup-*.tar
+*backup-*.tar.gz
+*backup-*.tgz
+*backup-*.zip
+*-backup.tar
+*-backup.tar.gz
+*-backup.tgz
+*-backup.zip
+.last-*-backup
 
-# Runtime files
-logs/
-*.log
-data/
-uploads/
-
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-
-# Editors / OS
-.vscode/
-.idea/
+# Repository/editor metadata not needed by the image build
+.git/
+**/.git/
+.gitignore
 .DS_Store
 Thumbs.db
-*.before_*
-
-# Local secrets
-secrets/
+*.swp
+*~

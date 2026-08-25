@@ -27,6 +27,9 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./secrets/odysseus.token:/run/secrets/odysseus.token:ro
+      - ./secrets/email-admins.txt:/run/secrets/email-admins.txt:ro
+      - ./secrets/email-indexer.json:/run/secrets/email-indexer.json:ro
+      - ./project_uploads:/app/project_uploads
     depends_on:
       db:
         condition: service_healthy
@@ -49,6 +52,24 @@ services:
       db:
         condition: service_healthy
     command: ["python", "-m", "app.worker"]
+
+  email-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?POSTGRES_USER must be set}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-mbc_intelligence}
+      OLLAMA_URL: ${OLLAMA_URL:?OLLAMA_URL must be set}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./secrets/email-indexer.json:/run/secrets/email-indexer.json:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "app.email_worker"]
 
 volumes:
   postgres_data:

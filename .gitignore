@@ -1,38 +1,67 @@
-# Secrets / environment
+# Secrets and local environment files
 .env
 .env.*
 !.env.example
+secrets/
+**/secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
 
-# Runtime data
-data/
-uploads/
+# Runtime and persistent application state
+project_uploads/
+postgres_data/
 logs/
 *.log
+*.pid
+*.sock
+*.sqlite
+*.sqlite3
+*.db
 
-# Python
+# Python and tool caches / local environments
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 .venv/
 venv/
+env/
 
-# Manual historical backups
+# Manual and generated backups
 backups/
 backend.backup-*/
-backend/app.backup-*/
-backend/app/*.backup
-backend/app/*.before-*
-
-# Editor / OS
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
-
-# Legacy/manual backup files
+**/app.backup-*/
 *.backup
 *.bak
 *.before-*
 *.before_*
+*.sql.gz
+*.dump
+*.backup.tar
+*.backup.tar.gz
+*.backup.tgz
+*.backup.zip
+*backup-*.tar
+*backup-*.tar.gz
+*backup-*.tgz
+*backup-*.zip
+*-backup.tar
+*-backup.tar.gz
+*-backup.tgz
+*-backup.zip
+.last-*-backup
 
-# Local secrets
-secrets/
+# Nested repositories and editor / OS noise
+.git/
+**/.git/
+.DS_Store
+Thumbs.db
+*.swp
+*~

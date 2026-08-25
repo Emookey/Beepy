@@ -127,13 +127,14 @@ def _raise_for_odysseus(response: httpx.Response, action: str) -> None:
     )
 
 
-def _create_session(client: httpx.Client) -> str:
-    name = f"[MBC Beepy] Tech {str(uuid4())[:8]}"
+def _create_session(client: httpx.Client, *, name_prefix: str = "Tech", rag: bool = True) -> str:
+    name = f"[MBC Beepy] {name_prefix} {str(uuid4())[:8]}"
+    rag_value = "true" if rag else "false"
     data = {
         "name": name,
         "endpoint_id": ODYSSEUS_ENDPOINT_ID,
         "model": ODYSSEUS_MODEL,
-        "rag": "true",
+        "rag": rag_value,
     }
     response = client.post("/api/session", data=data)
 
@@ -145,7 +146,7 @@ def _create_session(client: httpx.Client) -> str:
             "name": name,
             "endpoint_url": ODYSSEUS_OLLAMA_BASE,
             "model": ODYSSEUS_MODEL,
-            "rag": "true",
+            "rag": rag_value,
         }
         response = client.post("/api/session", data=data)
 
@@ -223,6 +224,48 @@ def answer_odysseus_tech(
                         exc,
                     )
 
+
+
+def answer_odysseus_grounded(
+    prompt: str,
+    history: list[dict] | None = None,
+) -> str:
+    """Use the Odysseus-hosted model with RAG disabled for supplied evidence.
+
+    This is intentionally separate from Tech mode so Email Intelligence can
+    summarize retrieved email evidence without mixing in ticket or RAG facts.
+    """
+    history = history or []
+    context = _conversation_context(history)
+    message = prompt
+    if context:
+        message = (
+            "Prior Beepy conversation is provided only to resolve pronouns or follow-up wording. "
+            "Do not treat it as evidence unless the current prompt explicitly includes that evidence.\n\n"
+            f"--- PRIOR CONVERSATION ---\n{context}\n--- END PRIOR CONVERSATION ---\n\n"
+            f"{prompt}"
+        )
+
+    session_id: str | None = None
+    with _client() as client:
+        try:
+            session_id = _create_session(client, name_prefix="Grounded", rag=False)
+            response = client.post(
+                "/api/chat",
+                json={"message": message, "session": session_id},
+            )
+            _raise_for_odysseus(response, "grounded chat")
+            payload = response.json()
+            answer = str(payload.get("response") or "").strip()
+            if not answer:
+                raise OdysseusError("Odysseus returned an empty grounded answer.")
+            return answer
+        finally:
+            if session_id:
+                try:
+                    client.delete(f"/api/session/{session_id}")
+                except Exception:
+                    pass
 
 def probe_odysseus() -> dict:
     """Authenticate to Odysseus without spending model tokens."""
