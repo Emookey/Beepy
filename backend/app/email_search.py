@@ -10,7 +10,6 @@ from sqlalchemy import func, or_, select, text
 
 from .db import SessionLocal
 from .models import EmailFolder, EmailMailbox, EmailMessage, EmailSearchAudit
-from .odysseus import OdysseusError, answer_odysseus_grounded
 from .ollama import embed
 
 
@@ -210,31 +209,30 @@ def _evidence(hits: list[EmailHit]) -> str:
 
 def answer_email_question(question: str, hits: list[EmailHit], history: list[dict] | None = None) -> str:
     if not hits:
-        return "## No matching email found\n\nI searched the indexed Microsoft 365 email source and did not find a matching message. I did **not** search Autotask tickets or Tech RAG as a fallback."
-    evidence = _evidence(hits)
-    instructions = (
-        "You are answering a Beepy Email Intelligence query. The evidence below contains ONLY Microsoft 365 email records. "
-        "Do not use Autotask ticket information, project RAG, external knowledge, or assumptions. "
-        "Answer only what the email evidence supports. Cite important claims with [Email N]. "
-        "If the evidence does not prove something, say that clearly. Preserve dates, sender/recipient identity, subject, and commitments accurately. "
-        "If the user asks to find/show messages, summarize the best matches rather than inventing a narrative.\n\n"
-        f"QUESTION:\n{question}\n\nEMAIL EVIDENCE:\n{evidence}"
-    )
-    try:
-        return answer_odysseus_grounded(instructions, history or [])
-    except OdysseusError as exc:
-        print(f"Grounded email summarizer unavailable: {exc}", flush=True)
-        lines = ["## Matching email", ""]
-        for index, hit in enumerate(hits[:10], 1):
-            when = hit.sent_at or hit.received_at
-            lines.extend([
-                f"**[Email {index}] {hit.subject}**",
-                f"From: {hit.sender_name or hit.sender_address} <{hit.sender_address}>" if hit.sender_address else f"From: {hit.sender_name}",
-                f"Date: {when.isoformat() if when else 'Unknown'}",
-                (hit.body_preview or hit.body_text[:500]).strip(),
-                "",
-            ])
-        return "\n\n".join(lines)
+        return "## No matching email found\n\nI searched the indexed Microsoft 365 email source and did not find a matching message. I did **not** search Autotask tickets or Kal technical knowledge as a fallback."
+
+    # Phase 3E.6B deliberately keeps business evidence out of Kal's technical
+    # contract.  Return the locally retrieved records without sending headers,
+    # bodies, history, or the user's question to any reasoning service.  The
+    # accepted history parameter remains only for API compatibility and is not
+    # used here because persisted chat history can contain another mode.
+    lines = [
+        "## Matching email",
+        "",
+        "Email synthesis is deferred until a separately approved business-data contract exists. "
+        "These are local indexed matches; Kal was not contacted.",
+        "",
+    ]
+    for index, hit in enumerate(hits[:10], 1):
+        when = hit.sent_at or hit.received_at
+        lines.extend([
+            f"**[Email {index}] {hit.subject}**",
+            f"From: {hit.sender_name or hit.sender_address} <{hit.sender_address}>" if hit.sender_address else f"From: {hit.sender_name}",
+            f"Date: {when.isoformat() if when else 'Unknown'}",
+            (hit.body_preview or hit.body_text[:500]).strip(),
+            "",
+        ])
+    return "\n\n".join(lines)
 
 
 def audit_email_search(user_email: str, question: str, hits: list[EmailHit], elapsed_ms: int) -> None:

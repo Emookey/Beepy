@@ -52,9 +52,9 @@ function decodeJwt(token){
 }
 function engineLabel(value){
   return ({
-    "odysseus-rag":"Odysseus RAG · qwen2.5:3b-project",
-    "local-qwen-fallback":"Local Qwen fallback",
-    "tech-unavailable":"Tech service unavailable",
+    "kal-shared-knowledge":"Kal · shared technical knowledge",
+    "odysseus-rag":"Kal · shared technical knowledge",
+    "kal-technical-unavailable":"Kal technical service unavailable",
     "autotask-exact":"Autotask tickets",
     "autotask-hybrid":"Autotask tickets",
     "autotask-no-match":"Autotask · no match",
@@ -604,6 +604,10 @@ function maybeFollowResponse(wasNearBottom=true){
 
 function messageExtrasMarkup(message){
   const sourceRows=(message.sources||[]).map(source=>{
+    if(source.sourceType==="kal-shared-knowledge"){
+      const label=source.title||"Shared technical knowledge";
+      return `<span class="source-chip kal-source">◈ ${esc(label)}</span>`;
+    }
     if(source.sourceType==="email"){
       const label=`✉ ${source.subject||source.title||"Email"}`;
       const meta=[source.sender,source.sentDate?new Date(source.sentDate).toLocaleDateString():""].filter(Boolean).join(" · ");
@@ -619,10 +623,13 @@ function messageExtrasMarkup(message){
       : `<span class="source-chip ticket-source">🎫 ${esc(label)}</span>`;
   }).filter(Boolean).join("");
   const sources=sourceRows?`<div class="sources source-chips">${sourceRows}</div>`:"";
+  const grounding=message.groundingStatus&&message.groundingStatus!=="not_applicable"
+    ? `<div class="engine">Grounding: ${esc(({grounded:"shared knowledge used",no_match:"no shared-knowledge match",degraded:"degraded"})[message.groundingStatus]||message.groundingStatus)}</div>`
+    : "";
   const engine=message.engine
     ? `<div class="engine">${esc(engineLabel(message.engine))}${message.elapsedMs?` · ${(message.elapsedMs/1000).toFixed(1)}s`:""}</div>`
     : "";
-  return `${sources}${engine}`;
+  return `${sources}${engine}${grounding}`;
 }
 
 function messageMarkup(message,index){
@@ -699,6 +706,7 @@ async function send(){
           state.conversationId=payload.conversationId;
           message.sources=payload.sources||[];
           message.engine=payload.engine||"";
+          message.groundingStatus=payload.groundingStatus||"";
         }else if(eventName==="token"){
           message.content+=(payload.text||"");
         }else if(eventName==="replace"){
@@ -822,9 +830,9 @@ function projectOverviewMarkup(){
 
 function projectBeepyMarkup(){
   const msgs=state.projectWorkspace?.beepyMessages||[];
-  return `<div class="project-section-head"><div><h2>Project Beepy</h2><p>Beepy receives project notes, decisions, tasks, risks, links, recent team chat, and Odysseus RAG context.</p></div><span class="ai-live-pill">● Odysseus RAG</span></div>
-    <div class="project-beepy-shell"><div class="project-beepy-stream">${msgs.length?msgs.map(x=>`<article class="project-ai-message ${x.role}"><div class="project-ai-avatar">${x.role==="assistant"?"B":esc(initials(x.authorEmail))}</div><div><div class="project-ai-meta">${x.role==="assistant"?"Beepy":esc(x.authorEmail)} · ${formatWhen(x.createdAt)}</div><div class="project-ai-content" data-project-message="${x.id}">${markdown(x.content)}</div></div></article>`).join(""):projectEmpty("🤖","Project Beepy is ready","Ask it to review the plan, challenge an idea, find risks, or build a deployment checklist.")}${state.projectBusy?'<article class="project-ai-message assistant"><div class="project-ai-avatar">B</div><div class="project-ai-content project-thinking">Beepy is reviewing the project…</div></article>':""}</div>
-    <form id="project-beepy-form" class="project-beepy-composer"><textarea id="project-beepy-input" placeholder="Ask Beepy about this project…"></textarea><button ${state.projectBusy?"disabled":""}>➤</button></form></div>`;
+  return `<div class="project-section-head"><div><h2>Project Beepy</h2><p>Project evidence remains local to Beepy. Assistant synthesis is deferred until a separate business-data contract is approved.</p></div><span class="ai-live-pill">Kal isolation active</span></div>
+    <div class="project-beepy-shell"><div class="project-beepy-stream">${msgs.length?msgs.map(x=>`<article class="project-ai-message ${x.role}"><div class="project-ai-avatar">${x.role==="assistant"?"B":esc(initials(x.authorEmail))}</div><div><div class="project-ai-meta">${x.role==="assistant"?"Beepy":esc(x.authorEmail)} · ${formatWhen(x.createdAt)}</div><div class="project-ai-content" data-project-message="${x.id}">${markdown(x.content)}</div></div></article>`).join(""):projectEmpty("🤖","Project synthesis deferred","Project records remain available in Beepy, but they are not sent to Kal technical chat.")}</div>
+    <form id="project-beepy-form" class="project-beepy-composer"><textarea id="project-beepy-input" placeholder="Deferred pending an approved business-data contract" disabled></textarea><button disabled>➤</button></form></div>`;
 }
 
 function projectChatMarkup(){
@@ -1001,7 +1009,7 @@ function render(){
   if(!state.account){renderLogin();return}
 
   const messages=state.messages.map(messageMarkup).join("");
-  const welcome=!state.messages.length?`<div class="welcome"><h1>What can Beepy help with?</h1><p>Search Autotask tickets, troubleshoot with Odysseus RAG, or search approved Microsoft 365 email history.</p><div class="quick"><button data-prompt="Show me recent VPN tickets">Recent VPN tickets</button><button data-prompt="Why would NetExtender authenticate but not receive an IP?">VPN troubleshooting</button>${state.emailStatus?.authorized?'<button data-prompt="Find emails about a server replacement quote">Search tenant email</button>':""}</div></div>`:"";
+  const welcome=!state.messages.length?`<div class="welcome"><h1>What can Beepy help with?</h1><p>Search Autotask tickets, troubleshoot with Kal shared technical knowledge, or search approved Microsoft 365 email history.</p><div class="quick"><button data-prompt="Show me recent VPN tickets">Recent VPN tickets</button><button data-prompt="Why would NetExtender authenticate but not receive an IP?">VPN troubleshooting</button>${state.emailStatus?.authorized?'<button data-prompt="Find emails about a server replacement quote">Search tenant email</button>':""}</div></div>`:"";
   const workspaceBody=state.page==="projects"
     ? `<section class="workspace-page">${projectsMarkup()}</section>`
     : `<section class="chat">${welcome}<div class="messages">${messages}${state.busy?'<article class="message assistant typing-message"><div class="avatar">B</div><div class="bubble typing">● ● ●</div></article>':""}<div id="end"></div></div></section>
@@ -1020,7 +1028,7 @@ function render(){
       <div class="history">${historyMarkup()}</div>
       <div class="sidebar-hint">Right-click a chat to delete it</div>
     </aside>
-    <main class="workspace"><header><div><h2>${state.page==="projects"?"Beepy Projects":"Beepy"}</h2><p>${state.page==="projects"?"Shared business project workspaces":"Autotask intelligence and Odysseus technical support"}</p></div><div class="user"><b>${esc(state.account.name)}</b><span>${esc(state.account.email)}</span></div></header>
+    <main class="workspace"><header><div><h2>${state.page==="projects"?"Beepy Projects":"Beepy"}</h2><p>${state.page==="projects"?"Shared business project workspaces":"Autotask intelligence and Kal technical support"}</p></div><div class="user"><b>${esc(state.account.name)}</b><span>${esc(state.account.email)}</span></div></header>
       ${workspaceBody}
     </main>
     ${settingsMarkup()}

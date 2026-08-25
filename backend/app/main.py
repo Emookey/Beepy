@@ -1,4 +1,5 @@
 from pathlib import Path
+import logging
 import os
 import re
 import shutil
@@ -20,9 +21,15 @@ from .models import (
     ProjectRisk, ProjectFile, ProjectActivity,
     EmailMailbox, EmailFolder, EmailMessage, EmailSearchAudit,
 )
-from .search import answer_tech_question, answer_ticket_question, search_tickets
-from .ollama import chat_stream
-from .odysseus import OdysseusError, answer_odysseus_tech
+from .search import answer_ticket_question, search_tickets
+from .kal import (
+    KalAuthenticationError,
+    KalConfigurationError,
+    KalError,
+    answer_kal_technical,
+    beepy_actor_audit_id,
+    probe_kal_capability,
+)
 from .autotask import AutotaskClient
 from .interpreter import interpret_question
 from .email_access import can_search_tenant_email
@@ -32,6 +39,7 @@ from .email_search import search_emails, answer_email_question, audit_email_sear
 settings = get_settings()
 autotask_client = AutotaskClient()
 app = FastAPI(title=settings.app_name)
+logger = logging.getLogger(__name__)
 
 class ChatRequest(BaseModel):
     question: str
@@ -76,6 +84,25 @@ def status(user: User = Depends(require_user)):
         "notes": notes,
         "emails": emails,
         "sync": state.value if state else {"status": "never"},
+    }
+
+
+@app.get("/api/kal/capabilities")
+def kal_capabilities(user: User = Depends(require_user)):
+    """Check only Kal's scoped, stateless Beepy capability."""
+
+    try:
+        capability = probe_kal_capability()
+    except KalAuthenticationError as exc:
+        raise HTTPException(503, "Kal service authentication is unavailable.") from exc
+    except KalError as exc:
+        raise HTTPException(503, "Kal technical capability is unavailable.") from exc
+    return {
+        "ok": True,
+        "contractVersion": "beepy-kal.v1",
+        "capability": capability.capability,
+        "stateless": capability.stateless,
+        "groundingStates": list(capability.grounding_states),
     }
 
 
@@ -728,63 +755,13 @@ def project_beepy(project_id: str, body: ProjectBeepyRequest, user: User = Depen
     if not question:
         raise HTTPException(400, "Question is required.")
     with SessionLocal() as db:
-        project, _ = _require_project(db, project_id, user.email)
-        recent_beepy = db.scalars(select(ProjectMessage).where(ProjectMessage.project_id == project.id, ProjectMessage.channel == "beepy").order_by(ProjectMessage.created_at.desc()).limit(10)).all()[::-1]
-        notes = db.scalars(select(ProjectNote).where(ProjectNote.project_id == project.id).order_by(ProjectNote.pinned.desc(), ProjectNote.updated_at.desc()).limit(25)).all()
-        tasks = db.scalars(select(ProjectTask).where(ProjectTask.project_id == project.id).order_by(ProjectTask.updated_at.desc()).limit(25)).all()
-        ideas = db.scalars(select(ProjectIdea).where(ProjectIdea.project_id == project.id).order_by(ProjectIdea.updated_at.desc()).limit(20)).all()
-        decisions = db.scalars(select(ProjectDecision).where(ProjectDecision.project_id == project.id).order_by(ProjectDecision.created_at.desc()).limit(20)).all()
-        risks = db.scalars(select(ProjectRisk).where(ProjectRisk.project_id == project.id).order_by(ProjectRisk.updated_at.desc()).limit(20)).all()
-        links = db.scalars(select(ProjectLink).where(ProjectLink.project_id == project.id).order_by(ProjectLink.created_at.desc()).limit(20)).all()
-        team = db.scalars(select(ProjectMessage).where(ProjectMessage.project_id == project.id, ProjectMessage.channel == "team").order_by(ProjectMessage.created_at.desc()).limit(20)).all()[::-1]
-        setting = _workspace_setting(db, project.id, create=False)
-
-        context_parts = [
-            f"PROJECT: {project.name}",
-            f"DESCRIPTION: {project.description or 'None'}",
-            f"STATUS: {setting.status or 'active'}",
-            f"CLIENT: {setting.client_name or 'Not set'}",
-        ]
-        if notes:
-            context_parts.append("PROJECT NOTES:\n" + "\n".join(f"- [{x.folder}] {x.title}: {x.content[:700]}" for x in notes))
-        if tasks:
-            context_parts.append("TASKS:\n" + "\n".join(f"- {x.status}/{x.priority}: {x.title} (assignee {x.assignee_email or 'unassigned'})" for x in tasks))
-        if ideas:
-            context_parts.append("IDEAS:\n" + "\n".join(f"- {x.status}: {x.title} — {x.description[:400]}" for x in ideas))
-        if decisions:
-            context_parts.append("DECISIONS:\n" + "\n".join(f"- {x.title}: {x.decision[:500]} Reason: {x.rationale[:300]}" for x in decisions))
-        if risks:
-            context_parts.append("RISKS:\n" + "\n".join(f"- {x.status} impact={x.impact} likelihood={x.likelihood}: {x.title}. Mitigation: {x.mitigation[:300]}" for x in risks))
-        if links:
-            context_parts.append("PROJECT LINKS:\n" + "\n".join(f"- {x.title}: {x.url} — {x.description[:250]}" for x in links))
-        if team:
-            context_parts.append("RECENT TEAM CHAT:\n" + "\n".join(f"- {x.author_email}: {x.content[:500]}" for x in team))
-        project_context = "\n\n".join(context_parts)[-14000:]
-        history = [{"role":x.role, "content":x.content} for x in recent_beepy]
-
-        user_msg = ProjectMessage(id=str(uuid4()), project_id=project.id, channel="beepy", role="user", author_email=_norm_email(user.email), content=question)
-        db.add(user_msg); db.commit()
-
-    prompt = (
-        "You are Beepy working inside a business project workspace. Use the project context below as working context. "
-        "Separate confirmed project facts from recommendations. Challenge risky assumptions, surface dependencies and rollback considerations, and suggest concrete next actions. "
-        "Never invent credentials or secrets.\n\n"
-        "--- PROJECT CONTEXT ---\n" + project_context + "\n--- END PROJECT CONTEXT ---\n\n"
-        "TEAM QUESTION:\n" + question
+        _require_project(db, project_id, user.email)
+    # Project facts are business data and are intentionally outside Kal's
+    # technical shared-knowledge contract.  Do not build or persist a prompt.
+    raise HTTPException(
+        503,
+        "Project assistant synthesis is deferred pending an approved business-data contract. Project data remains in Beepy and was not sent to Kal.",
     )
-    try:
-        answer = answer_odysseus_tech(prompt, history)
-    except OdysseusError as exc:
-        raise HTTPException(503, f"Project Beepy is unavailable: {exc}") from exc
-
-    with SessionLocal() as db:
-        project, _ = _require_project(db, project_id, user.email)
-        assistant_msg = ProjectMessage(id=str(uuid4()), project_id=project.id, channel="beepy", role="assistant", author_email="beepy@mbc.local", content=answer)
-        db.add(assistant_msg)
-        _activity(db, project.id, user.email, "asked Beepy about the project", "message", assistant_msg.id)
-        project.updated_at = datetime.now(timezone.utc)
-        db.commit(); db.refresh(assistant_msg)
-        return {"response": answer, "messageId": assistant_msg.id, "engine": "odysseus-rag"}
 
 
 @app.post("/api/projects/{project_id}/notes")
@@ -1049,6 +1026,11 @@ def _resolve_chat_mode(requested_mode: str, question: str, user_email: str) -> t
     requested = (requested_mode or "auto").strip().lower()
     if requested == "smart":
         requested = "auto"
+    if requested in {"odysseus-rag", "kal", "kal-technical"}:
+        return "tech", {
+            "requested": requested,
+            "reason": "Kal technical compatibility alias",
+        }
     if requested in {"tickets", "tech", "email"}:
         return requested, {"requested": requested, "reason": "manual"}
 
@@ -1142,6 +1124,28 @@ def _resolve_chat_mode(requested_mode: str, question: str, user_email: str) -> t
     }
 
 
+def _mode_marker(mode: str) -> dict[str, str]:
+    return {"sourceType": "beepy-mode", "mode": mode}
+
+
+def _history_for_mode(rows, mode: str) -> list[dict[str, str]]:
+    """Return only locally persisted turns explicitly tagged for this mode."""
+
+    history = []
+    for row in rows:
+        metadata = row.sources if isinstance(row.sources, list) else []
+        if not any(
+            isinstance(item, dict)
+            and item.get("sourceType") == "beepy-mode"
+            and item.get("mode") == mode
+            for item in metadata
+        ):
+            continue
+        if row.role in {"user", "assistant"} and str(row.content or "").strip():
+            history.append({"role": row.role, "content": row.content})
+    return history[-12:]
+
+
 def _ticket_sources(tickets: list[Ticket]) -> list[dict]:
     return [
         {
@@ -1186,11 +1190,64 @@ def _clarify_source_answer() -> str:
     )
 
 
+def _technical_answer(question: str, user_email: str) -> tuple[str, str, list[dict], str, str | None]:
+    """Use only Kal's stateless technical contract for one isolated turn."""
+
+    try:
+        result = answer_kal_technical(
+            question,
+            actor_identifier=beepy_actor_audit_id(user_email),
+        )
+    except KalConfigurationError:
+        logger.warning("Kal technical request unavailable error=configuration")
+        return (
+            "## Kal technical service is not configured\n\n"
+            "Beepy's scoped Kal service credential or endpoint configuration is unavailable. "
+            "No personal Kal token or direct model fallback was attempted.",
+            "kal-technical-unavailable",
+            [],
+            "degraded",
+            None,
+        )
+    except KalAuthenticationError:
+        logger.warning("Kal technical request unavailable error=authentication")
+        return (
+            "## Kal technical authentication unavailable\n\n"
+            "Kal rejected Beepy's scoped service credential. "
+            "No personal Kal token or direct model fallback was attempted.",
+            "kal-technical-unavailable",
+            [],
+            "degraded",
+            None,
+        )
+    except KalError as exc:
+        logger.warning("Kal technical request unavailable error=%s", type(exc).__name__)
+        return (
+            "## Kal technical service unavailable\n\n"
+            "The scoped Kal capability could not complete this request. "
+            "Ticket Search and Email Intelligence remain isolated, and no direct model fallback was attempted.",
+            "kal-technical-unavailable",
+            [],
+            "degraded",
+            None,
+        )
+    return (
+        result.response,
+        "kal-shared-knowledge",
+        [source.as_beepy_source() for source in result.sources],
+        result.grounding_status,
+        result.request_id,
+    )
+
+
 @app.post("/api/chat")
 def chat_endpoint(body: ChatRequest, user: User = Depends(require_user)):
     question = body.question.strip()
     if not question:
         raise HTTPException(400, "Question is required.")
+
+    requested_mode = body.mode.lower()
+    mode, route_plan = _resolve_chat_mode(requested_mode, question, user.email)
 
     with SessionLocal() as db:
         conversation = None
@@ -1211,16 +1268,14 @@ def chat_endpoint(body: ChatRequest, user: User = Depends(require_user)):
         history_rows = db.scalars(
             select(Message).where(Message.conversation_id == conversation.id).order_by(Message.created_at)
         ).all()
-        history = [{"role": x.role, "content": x.content} for x in history_rows[-12:]]
+        history = _history_for_mode(history_rows, mode)
         db.add(Message(
             conversation_id=conversation.id, user_email=user.email,
-            role="user", content=question, sources=[],
+            role="user", content=question, sources=[_mode_marker(mode)],
         ))
         db.commit()
         conversation_id = conversation.id
 
-    requested_mode = body.mode.lower()
-    mode, route_plan = _resolve_chat_mode(requested_mode, question, user.email)
     tickets = []
     email_hits = []
 
@@ -1253,28 +1308,19 @@ def chat_endpoint(body: ChatRequest, user: User = Depends(require_user)):
         engine = "source-clarification"
         sources = []
     else:
-        try:
-            answer = answer_odysseus_tech(question, history)
-            engine = "odysseus-rag"
-        except OdysseusError as exc:
-            print(f"Odysseus tech fallback: {exc}", flush=True)
-            try:
-                answer = answer_tech_question(question, history)
-                engine = "local-qwen-fallback"
-            except Exception as fallback_exc:
-                print(f"Local tech fallback also failed: {fallback_exc}", flush=True)
-                answer = (
-                    "## Tech service unavailable\n\n"
-                    "Odysseus could not answer this request, and the local fallback model "
-                    "was also unavailable. Ticket Search and Email Intelligence remain isolated."
-                )
-                engine = "tech-unavailable"
-        sources = []
+        answer, engine, sources, grounding_status, kal_request_id = _technical_answer(
+            question, user.email
+        )
+
+    if mode != "tech":
+        grounding_status = "not_applicable"
+        kal_request_id = None
 
     with SessionLocal() as db:
         db.add(Message(
             conversation_id=conversation_id, user_email=user.email,
-            role="assistant", content=answer, sources=sources,
+            role="assistant", content=answer,
+            sources=[_mode_marker(mode), *sources],
         ))
         db.commit()
 
@@ -1286,6 +1332,8 @@ def chat_endpoint(body: ChatRequest, user: User = Depends(require_user)):
         "matchedTickets": len(tickets),
         "matchedEmails": len(email_hits),
         "resolvedMode": mode,
+        "groundingStatus": grounding_status,
+        "kalRequestId": kal_request_id,
     }
 
 
@@ -1296,6 +1344,9 @@ def chat_stream_endpoint(body: ChatRequest, user: User = Depends(require_user)):
     question = body.question.strip()
     if not question:
         raise HTTPException(400, "Question is required.")
+
+    requested_mode = body.mode.lower()
+    mode, route_plan = _resolve_chat_mode(requested_mode, question, user.email)
 
     with SessionLocal() as db:
         conversation = None
@@ -1316,16 +1367,14 @@ def chat_stream_endpoint(body: ChatRequest, user: User = Depends(require_user)):
         history_rows = db.scalars(
             select(Message).where(Message.conversation_id == conversation.id).order_by(Message.created_at)
         ).all()
-        history = [{"role": row.role, "content": row.content} for row in history_rows[-12:]]
+        history = _history_for_mode(history_rows, mode)
         db.add(Message(
             conversation_id=conversation.id, user_email=user.email,
-            role="user", content=question, sources=[],
+            role="user", content=question, sources=[_mode_marker(mode)],
         ))
         db.commit()
         conversation_id = conversation.id
 
-    requested_mode = body.mode.lower()
-    mode, route_plan = _resolve_chat_mode(requested_mode, question, user.email)
     started = time.perf_counter()
     tickets = search_tickets(question) if mode == "tickets" else []
     email_hits = search_emails(question) if mode == "email" and can_search_tenant_email(user.email) else []
@@ -1350,22 +1399,14 @@ def chat_stream_endpoint(body: ChatRequest, user: User = Depends(require_user)):
             answer = _clarify_source_answer()
             engine = "source-clarification"
         else:
-            try:
-                answer = answer_odysseus_tech(question, history)
-                engine = "odysseus-rag"
-            except OdysseusError as exc:
-                print(f"Odysseus tech fallback: {exc}", flush=True)
-                try:
-                    answer = answer_tech_question(question, history)
-                    engine = "local-qwen-fallback"
-                except Exception as fallback_exc:
-                    print(f"Local tech fallback also failed: {fallback_exc}", flush=True)
-                    answer = (
-                        "## Tech service unavailable\n\n"
-                        "Odysseus could not answer this request, and the local fallback model "
-                        "was also unavailable. Ticket Search and Email Intelligence remain isolated."
-                    )
-                    engine = "tech-unavailable"
+            answer, engine, technical_sources, grounding_status, kal_request_id = _technical_answer(
+                question, user.email
+            )
+            sources[:] = technical_sources
+
+        if mode != "tech":
+            grounding_status = "not_applicable"
+            kal_request_id = None
 
         yield f"event: meta\ndata: {json.dumps({
             'conversationId': conversation_id,
@@ -1374,6 +1415,8 @@ def chat_stream_endpoint(body: ChatRequest, user: User = Depends(require_user)):
             'matchedTickets': len(tickets),
             'matchedEmails': len(email_hits),
             'resolvedMode': mode,
+            'groundingStatus': grounding_status,
+            'kalRequestId': kal_request_id,
         })}\n\n"
         yield f"event: token\ndata: {json.dumps({'text': answer})}\n\n"
 
@@ -1383,7 +1426,8 @@ def chat_stream_endpoint(body: ChatRequest, user: User = Depends(require_user)):
         with SessionLocal() as db:
             db.add(Message(
                 conversation_id=conversation_id, user_email=user.email,
-                role="assistant", content=answer, sources=sources,
+                role="assistant", content=answer,
+                sources=[_mode_marker(mode), *sources],
             ))
             db.add(RetrievalLog(
                 user_email=user.email,
