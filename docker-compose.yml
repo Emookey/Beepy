@@ -26,7 +26,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./secrets/odysseus.token:/run/secrets/odysseus.token:ro
+      - ./secrets/kal-beepy-service.token:/run/secrets/kal-beepy-service.token:ro
       - ./secrets/email-admins.txt:/run/secrets/email-admins.txt:ro
       - ./secrets/email-indexer.json:/run/secrets/email-indexer.json:ro
       - ./project_uploads:/app/project_uploads

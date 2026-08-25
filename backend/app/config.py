@@ -23,9 +23,18 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: int = 240
     ollama_context: int = 32768
 
-    odysseus_base_url: str
-    odysseus_endpoint_id: str
-    odysseus_ollama_base: str
+    # Canonical scoped Kal technical integration.  The service credential is
+    # read from one mounted file; Beepy never accepts a per-user token map on
+    # this path.  ODYSSEUS_* values remain narrow compatibility aliases and
+    # are resolved (including conflict checks) by app.kal.
+    kal_base_url: str | None = None
+    kal_service_token_path: str | None = None
+    kal_timeout_seconds: float = 180.0
+
+    odysseus_base_url: str | None = None
+    odysseus_token_path: str | None = None
+    odysseus_endpoint_id: str | None = None
+    odysseus_ollama_base: str | None = None
 
     sync_interval_seconds: int = 900
     full_sync_on_empty: bool = True
