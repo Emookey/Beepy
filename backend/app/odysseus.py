@@ -1,3 +1,10 @@
+"""Inactive legacy rollback adapter.
+
+Canonical technical mode, project mode, email mode, and capability probing do
+not call the generic session functions retained below.  Removal is deferred to
+a separately approved compatibility cleanup.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -268,13 +275,14 @@ def answer_odysseus_grounded(
                     pass
 
 def probe_odysseus() -> dict:
-    """Authenticate to Odysseus without spending model tokens."""
-    with _client() as client:
-        response = client.get("/api/sessions")
-        _raise_for_odysseus(response, "authentication probe")
+    """Compatibility probe routed to Kal's scoped capability endpoint."""
+    from .kal import probe_kal_capability
+
+    capability = probe_kal_capability()
     return {
         "ok": True,
-        "base_url": ODYSSEUS_BASE_URL,
-        "model": ODYSSEUS_MODEL,
-        "rag": True,
+        "contract_version": "beepy-kal.v1",
+        "capability": capability.capability,
+        "stateless": capability.stateless,
+        "grounding_states": list(capability.grounding_states),
     }
