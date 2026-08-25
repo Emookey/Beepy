@@ -7,11 +7,11 @@ Beepy originated as MBC Intelligence and was originally developed by Jerry Sandy
 ## Identity
 
 - **Kalvin** is the overall AI workspace platform and ecosystem.
-- **Kal** is the planned canonical general assistant application.
+- **Kal** is the canonical general assistant application and owns technical model/provider selection.
 - **Beepy** is the business intelligence application in this repository candidate.
 - **Kalvin Core** is the planned primary compute host/deployment profile.
 
-Odysseus remains the active integration name in this source until the separate Kal/Odysseus reconciliation is complete. Its Python module names, API engine identifiers, token path, endpoint configuration, and user-visible transition labels are compatibility interfaces and have not been renamed here.
+Beepy technical mode uses Kal's scoped, stateless `beepy-kal.v1` service contract. A single externally mounted Beepy service credential can access only Kal's dedicated capability and technical-chat routes. Authenticated Beepy users are carried only as hashed audit context and never select a Kal identity or token.
 
 ## Architecture
 
@@ -21,8 +21,8 @@ Odysseus remains the active integration name in this source until the separate K
 - Autotask ticket synchronization and citation links
 - Microsoft Entra sign-in
 - Microsoft Graph email indexing and search
-- Ollama chat and embedding models
-- Odysseus RAG integration during the Kal transition
+- Local Ollama functionality retained for Beepy-owned ticket/email retrieval dependencies
+- Provider-neutral Kal shared-technical-knowledge integration
 - Persistent project uploads
 
 The current Compose file publishes the application on loopback port `9080`. It retains legacy T420 database, volume, secret-mount, network, and service assumptions for compatibility. Those identifiers are not the approved fresh Kalvin Core deployment contract.
@@ -36,9 +36,9 @@ Runtime configuration must be externally provisioned. The source currently expec
 - PostgreSQL connection settings
 - Entra tenant/client settings and an allowed email domain
 - Autotask API settings
-- Ollama endpoints, model names, and retrieval controls
-- Odysseus compatibility endpoint settings
-- externally mounted Odysseus and email integration secret files
+- Ollama endpoints, model names, and Beepy-owned retrieval controls
+- Kal scoped-service base URL, token-file path, and timeout
+- externally mounted Kal service and email integration secret files
 - an external persistent project-upload location
 
 ## Repository boundaries
@@ -66,11 +66,15 @@ The candidate intentionally retains legacy identifiers when renaming could affec
 - `mbc_intelligence` database defaults and `mbc` operating/database users
 - the `postgres_data` Compose volume key
 - legacy Tailscale groups, tags, and host URL examples
-- Odysseus module, symbol, path, engine, and display names
+- the inactive `app.odysseus` module and symbols for source compatibility; canonical technical mode does not import or call them
+- `ODYSSEUS_BASE_URL` and `ODYSSEUS_TOKEN_PATH` as fail-closed aliases for the corresponding `KAL_*` settings
+- `odysseus-rag` as an input/display compatibility identifier mapped to the safe Kal technical path
 - `beepy@mbc.local`, pending review of persisted project messages and API consumers
 - legacy operational script filenames
 
 See the Phase 3E audit workspace reports and manifests for the compatibility contract, naming impact map, validation evidence, and source hashes.
+
+Project assistant synthesis and generative email summarization are intentionally deferred. Project and email business evidence stays inside Beepy and is never sent to Kal's technical route. Ticket answering remains Beepy-owned. Technical turns send only the current technical question, so persisted ticket, project, and email history cannot cross the Kal boundary.
 
 ## Promotion status
 
