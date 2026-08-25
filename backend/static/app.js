@@ -723,8 +723,7 @@ async function send(){
 
 function renderLogin(){
   app.innerHTML=`<main class="login-page"><section class="login-card">
-    
-    <h1>Sign in to MBC Intelligence</h1>
+    <h1>Sign in to Beepy</h1>
     <p>Private access through Microsoft Entra ID and Tailscale.</p>
     <button id="login" class="microsoft-button"><span class="ms-logo"><i></i><i></i><i></i><i></i></span>Sign in with Microsoft</button>
   </section></main>`;
@@ -845,7 +844,7 @@ function projectNotesMarkup(){
 
 function projectFilesMarkup(){
   const files=state.projectWorkspace?.files||[];
-  return `<div class="project-section-head"><div><h2>Files</h2><p>Shared project attachments. Files stay on Goodwill in a persistent project_uploads volume.</p></div></div>
+  return `<div class="project-section-head"><div><h2>Files</h2><p>Shared project attachments use persistent project upload storage.</p></div></div>
     <form id="project-file-form" class="project-upload-box"><div>📁</div><b>Upload a project file</b><span>PDFs, screenshots, logs, configs, documents and other project material · 25 MB max</span><input id="project-file-input" type="file" required><button class="primary-action">Upload</button></form>
     <div class="project-file-list">${files.map(x=>`<article class="project-file-row"><div class="file-icon">${/image/.test(x.contentType||"")?"🖼":"📄"}</div><div><b>${esc(x.filename)}</b><span>${Math.max(1,Math.round((x.sizeBytes||0)/1024))} KB · ${esc(x.uploadedByEmail)} · ${formatWhen(x.createdAt)}</span></div><div><button data-file-download="${x.id}" data-filename="${esc(x.filename)}">Download</button><button data-file-delete="${x.id}" class="danger-text">Delete</button></div></article>`).join("")||projectEmpty("📁","No files uploaded","Keep project evidence, diagrams, logs, and documentation together.")}</div>`;
 }
@@ -916,7 +915,7 @@ function projectLinkPreviewMarkup(){
 function projectWorkspaceMarkup(){
   const p=state.activeProject;if(!p)return "";const w=state.projectWorkspace||{};
   const tabs=[["overview","▦","Overview"],["beepy","✦","Beepy"],["chat","💬","Team Chat"],["notes","📝","Notes"],["files","📁","Files"],["links","🔗","Links"],["tasks","✓","Tasks"],["ideas","💡","Ideas"],["decisions","◆","Decisions"],["risks","⚠","Risks"],["activity","◷","Activity"],["members","👥","Members"]];
-  return `<section class="project-workspace-v3"><div class="project-workspace-header"><div><button id="projects-back" class="back-link">← Projects</button><div class="project-title-line"><h1>${esc(p.name)}</h1><span class="role-chip role-${esc(p.role)}">${roleLabel(p.role)}</span><span class="project-status status-${esc(w.settings?.status||"active")}">${esc(w.settings?.status||"active")}</span></div><p>${esc(p.description||"Shared MBC project workspace")}</p></div><div class="project-header-actions"><div class="member-stack">${(p.members||[]).slice(0,5).map(x=>`<span title="${esc(x.email)}">${esc(initials(x.email))}</span>`).join("")}</div><button id="project-refresh" class="secondary-action">↻ Refresh</button>${p.permissions?.manageWorkspace?'<button id="project-toolbox" class="primary-action">🧰 Toolbox</button>':""}</div></div><div class="project-shell"><aside class="project-nav">${tabs.map(([id,icon,label])=>`<button data-project-tab="${id}" class="${state.projectTab===id?"active":""}"><span>${icon}</span>${label}${id==="chat"&&w.teamMessages?.length?`<em>${w.teamMessages.length}</em>`:""}</button>`).join("")}</aside><main class="project-content">${projectTabMarkup()}</main></div>${projectToolboxMarkup()}${projectLinkPreviewMarkup()}</section>`;
+  return `<section class="project-workspace-v3"><div class="project-workspace-header"><div><button id="projects-back" class="back-link">← Projects</button><div class="project-title-line"><h1>${esc(p.name)}</h1><span class="role-chip role-${esc(p.role)}">${roleLabel(p.role)}</span><span class="project-status status-${esc(w.settings?.status||"active")}">${esc(w.settings?.status||"active")}</span></div><p>${esc(p.description||"Shared Beepy project workspace")}</p></div><div class="project-header-actions"><div class="member-stack">${(p.members||[]).slice(0,5).map(x=>`<span title="${esc(x.email)}">${esc(initials(x.email))}</span>`).join("")}</div><button id="project-refresh" class="secondary-action">↻ Refresh</button>${p.permissions?.manageWorkspace?'<button id="project-toolbox" class="primary-action">🧰 Toolbox</button>':""}</div></div><div class="project-shell"><aside class="project-nav">${tabs.map(([id,icon,label])=>`<button data-project-tab="${id}" class="${state.projectTab===id?"active":""}"><span>${icon}</span>${label}${id==="chat"&&w.teamMessages?.length?`<em>${w.teamMessages.length}</em>`:""}</button>`).join("")}</aside><main class="project-content">${projectTabMarkup()}</main></div>${projectToolboxMarkup()}${projectLinkPreviewMarkup()}</section>`;
 }
 
 function projectsMarkup(){
@@ -1013,7 +1012,7 @@ function render(){
   app.innerHTML=`<div class="app ${state.collapsed?"collapsed":""} ${state.preferences.showDetails?"":"hide-details"}">
     <aside class="sidebar">
       <div class="sidebar-tools"><button id="settings" class="sidebar-tool" title="Settings" aria-label="Settings">⚙</button><button id="collapse" class="sidebar-tool" title="Toggle sidebar" aria-label="Toggle sidebar">☰</button></div>
-      <div class="brand">MBC<span>INTELLIGENCE</span></div>
+      <div class="brand">BEEPY<span>BUSINESS INTELLIGENCE</span></div>
       <button id="home" class="nav ${state.page==="chat"?"active":""}">⌂ <span>Home</span></button>
       <button id="new" class="nav">＋ <span>New chat</span></button>
       <button id="projects" class="nav ${state.page==="projects"?"active":""}">▣ <span>Projects</span></button>
@@ -1021,7 +1020,7 @@ function render(){
       <div class="history">${historyMarkup()}</div>
       <div class="sidebar-hint">Right-click a chat to delete it</div>
     </aside>
-    <main class="workspace"><header><div><h2>${state.page==="projects"?"MBC - Projects":"MBC - Beepy"}</h2><p>${state.page==="projects"?"Shared workspaces for MBC teams":"Autotask intelligence and Odysseus technical support"}</p></div><div class="user"><b>${esc(state.account.name)}</b><span>${esc(state.account.email)}</span></div></header>
+    <main class="workspace"><header><div><h2>${state.page==="projects"?"Beepy Projects":"Beepy"}</h2><p>${state.page==="projects"?"Shared business project workspaces":"Autotask intelligence and Odysseus technical support"}</p></div><div class="user"><b>${esc(state.account.name)}</b><span>${esc(state.account.email)}</span></div></header>
       ${workspaceBody}
     </main>
     ${settingsMarkup()}

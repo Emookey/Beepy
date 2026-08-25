@@ -766,7 +766,7 @@ def project_beepy(project_id: str, body: ProjectBeepyRequest, user: User = Depen
         db.add(user_msg); db.commit()
 
     prompt = (
-        "You are Beepy working inside an MBC MSP project workspace. Use the project context below as working context. "
+        "You are Beepy working inside a business project workspace. Use the project context below as working context. "
         "Separate confirmed project facts from recommendations. Challenge risky assumptions, surface dependencies and rollback considerations, and suggest concrete next actions. "
         "Never invent credentials or secrets.\n\n"
         "--- PROJECT CONTEXT ---\n" + project_context + "\n--- END PROJECT CONTEXT ---\n\n"

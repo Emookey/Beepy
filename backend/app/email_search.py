@@ -213,7 +213,7 @@ def answer_email_question(question: str, hits: list[EmailHit], history: list[dic
         return "## No matching email found\n\nI searched the indexed Microsoft 365 email source and did not find a matching message. I did **not** search Autotask tickets or Tech RAG as a fallback."
     evidence = _evidence(hits)
     instructions = (
-        "You are answering an MBC Email Intelligence query. The evidence below contains ONLY Microsoft 365 email records. "
+        "You are answering a Beepy Email Intelligence query. The evidence below contains ONLY Microsoft 365 email records. "
         "Do not use Autotask ticket information, project RAG, external knowledge, or assumptions. "
         "Answer only what the email evidence supports. Cite important claims with [Email N]. "
         "If the evidence does not prove something, say that clearly. Preserve dates, sender/recipient identity, subject, and commitments accurately. "

@@ -14,7 +14,7 @@ if grep -qE 'PASTE_|CHANGE_TO_' .env; then
   exit 1
 fi
 
-echo "Building and starting MBC Intelligence..."
+echo "Building and starting Beepy..."
 sudo docker compose up -d --build
 
 echo "Waiting for the application..."
@@ -31,7 +31,7 @@ sudo tailscale serve --bg http://127.0.0.1:9080
 
 DNS_NAME="$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//')"
 echo
-echo "MBC Intelligence is available privately at:"
+echo "Beepy is available privately at:"
 echo "  https://${DNS_NAME}/"
 echo
 echo "Add this exact SPA redirect URI in Microsoft Entra:"

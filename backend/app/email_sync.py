@@ -364,7 +364,7 @@ def sync_email_all(*, mailbox_filter: str | None = None, max_mailboxes: int | No
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Backfill or incrementally synchronize Microsoft 365 email into MBC Intelligence.")
+    parser = argparse.ArgumentParser(description="Backfill or incrementally synchronize Microsoft 365 email into Beepy.")
     parser.add_argument("--mailbox", help="Only sync one mailbox address")
     parser.add_argument("--max-mailboxes", type=int)
     parser.add_argument("--max-folders", type=int)
