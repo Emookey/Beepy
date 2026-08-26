@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export GIT_PAGER=cat
+export PAGER=cat
+export GIT_OPTIONAL_LOCKS=0
+
+SCRIPT_PATH=$(readlink -f -- "${BASH_SOURCE[0]}")
+SCRIPT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
+# shellcheck source=lib/beepy-git-common.sh
+source "$SCRIPT_DIR/lib/beepy-git-common.sh"
+
+usage() {
+    cat <<'EOF'
+Usage: beepy-sync [--help]
+
+Safely checks origin/development while on development. It fetches only that
+branch, classifies equal/behind/ahead/diverged history, and asks before a
+fast-forward-only update when local development is behind.
+
+This helper never stashes, rebases, force pushes, resolves conflicts, switches
+branches, or modifies main.
+EOF
+}
+
+if (( $# > 1 )); then
+    usage >&2
+    exit 2
+fi
+if (( $# == 1 )); then
+    case $1 in
+        --help|-h) usage; exit 0 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+fi
+
+beepy_require_repository
+cd -- "$BEEPY_REPO_ROOT"
+beepy_guard_mutating_state
+beepy_load_origin
+beepy_validate_development_upstream
+
+printf '%s\n' "About to check origin/development for new Git history."
+printf '%s\n' "Git command:"
+printf '%s\n' "git fetch origin development"
+beepy_print_effects "unchanged" "unchanged" "downloads objects and updates FETCH_HEAD only" "unchanged"
+git fetch origin development
+
+remote_sha=$(git rev-parse --verify 'FETCH_HEAD^{commit}' 2>/dev/null) || {
+    beepy_stop "The fetch did not provide one usable development commit."
+    exit 1
+}
+local_sha=$(git rev-parse HEAD)
+
+if [[ "$local_sha" == "$remote_sha" ]]; then
+    printf '%s\n' "LOCAL == REMOTE"
+    printf '%s\n' "development is up to date with origin/development."
+    exit 0
+fi
+
+if git merge-base --is-ancestor "$local_sha" "$remote_sha"; then
+    printf '%s\n' "LOCAL BEHIND REMOTE ONLY"
+
+    dirty_count=$(git status --short --untracked-files=all | awk 'END { print NR + 0 }')
+    if (( dirty_count > 0 )); then
+        cat >&2 <<'EOF'
+STOP: GitHub has newer development commits, but the working tree has unsaved changes.
+
+Nothing was updated and no changes were stashed.
+First either:
+- Create a checkpoint with beepy-save.
+- Intentionally handle or discard the changes manually with assistance.
+EOF
+        exit 1
+    fi
+
+    cat <<'EOF'
+GitHub has newer commits and your local branch has no competing commits.
+
+A fast-forward safely moves your local development branch forward to the same
+known history.
+
+No merge commit is required.
+
+About to update local development using fast-forward-only behavior.
+Git command:
+git merge --ff-only FETCH_HEAD
+EOF
+    beepy_print_effects "updated to the fetched development snapshot" "updated to match that snapshot" "development moves forward without a merge commit" "unchanged"
+
+    if ! beepy_confirm "Fast-forward local development now? [y/N] "; then
+        printf '%s\n' "Canceled. Local development was not updated."
+        exit 0
+    fi
+
+    beepy_guard_mutating_state
+    if [[ -n "$(git status --short --untracked-files=all)" ]]; then
+        beepy_stop "The working tree changed before the update. Nothing was fast-forwarded."
+        exit 1
+    fi
+    if ! git merge --ff-only FETCH_HEAD; then
+        printf '%s\n' "STOP: The fast-forward is no longer possible." >&2
+        printf '%s\n' "No ordinary merge, rebase, reset, or force operation was attempted." >&2
+        exit 1
+    fi
+    printf '%s\n' "Fast-forward complete. Local development matches the fetched remote history."
+    exit 0
+fi
+
+if git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
+    printf '%s\n' "LOCAL AHEAD REMOTE ONLY"
+    printf '%s\n' "Local development has commits waiting to be pushed. Nothing was modified."
+    exit 0
+fi
+
+cat >&2 <<'EOF'
+LOCAL AND REMOTE DIVERGED
+
+STOP: Both your copy and GitHub contain commits the other does not have.
+This helper will not guess how to combine them.
+Ask for help before continuing.
+
+No merge, rebase, reset, stash, or force operation was attempted.
+EOF
+exit 1

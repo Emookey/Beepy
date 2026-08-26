@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export GIT_PAGER=cat
+export PAGER=cat
+export GIT_OPTIONAL_LOCKS=0
+
+SCRIPT_PATH=$(readlink -f -- "${BASH_SOURCE[0]}")
+SCRIPT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
+# shellcheck source=lib/beepy-git-common.sh
+source "$SCRIPT_DIR/lib/beepy-git-common.sh"
+
+usage() {
+    cat <<'EOF'
+Usage: beepy-status [--help]
+
+Read-only summary of the current Git repository, branch, changes, identity,
+upstream comparison, operation state, and whether normal Beepy work is safe.
+
+This command does not fetch, modify refs, touch the index, or create files.
+It may inspect any branch and never modifies main.
+EOF
+}
+
+if (( $# > 1 )); then
+    usage >&2
+    exit 2
+fi
+if (( $# == 1 )); then
+    case $1 in
+        --help|-h) usage; exit 0 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+fi
+
+beepy_require_repository
+cd -- "$BEEPY_REPO_ROOT"
+
+branch=$(beepy_current_branch)
+operation=$(beepy_operation_in_progress)
+conflicts=$(beepy_conflict_count)
+staged=$(git --no-pager diff --cached --name-only -z -- |
+    awk 'BEGIN { RS="\0" } length($0) { count++ } END { print count + 0 }')
+unstaged=$(git --no-pager diff --name-only -z -- |
+    awk 'BEGIN { RS="\0" } length($0) { count++ } END { print count + 0 }')
+untracked=$(git ls-files --others --exclude-standard -z -- |
+    awk 'BEGIN { RS="\0" } length($0) { count++ } END { print count + 0 }')
+
+if (( conflicts > 0 )); then
+    working_tree=conflicts
+elif (( staged + unstaged + untracked > 0 )); then
+    working_tree=modified
+else
+    working_tree=clean
+fi
+
+identity_name=$(git config --get user.name 2>/dev/null || true)
+identity_email=$(git config --get user.email 2>/dev/null || true)
+if [[ -n "${identity_name//[[:space:]]/}" && -n "${identity_email//[[:space:]]/}" ]]; then
+    identity_state=configured
+    identity_display="$identity_name <$identity_email>"
+    identity_usable=YES
+    lowered_identity_name=${identity_name,,}
+    lowered_identity_email=${identity_email,,}
+    if [[ "$lowered_identity_email" == beepy-history@invalid.example ||
+          "$lowered_identity_email" == beepy-migration@invalid.example ||
+          "$lowered_identity_name" == "beepy repository migration" ]]; then
+        identity_usable=NO
+    fi
+else
+    identity_state=missing
+    identity_display="not fully configured"
+    identity_usable=NO
+fi
+
+upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)
+if [[ -n "$upstream" ]] && git rev-parse --verify --quiet '@{upstream}^{commit}' >/dev/null; then
+    read -r ahead behind < <(git rev-list --left-right --count 'HEAD...@{upstream}')
+else
+    upstream=missing
+    ahead=unknown
+    behind=unknown
+fi
+
+healthy=YES
+if ! beepy_repository_is_healthy; then
+    healthy=NO
+fi
+
+safe=YES
+if [[ -z "$branch" ]]; then
+    branch="detached HEAD"
+    safe=NO
+    reason="HEAD is detached; switch to development before normal Beepy work."
+elif [[ "$branch" == main ]]; then
+    safe=NO
+    reason="main is stable and must not be used for normal Beepy changes."
+elif [[ "$branch" != development ]]; then
+    safe=NO
+    reason="Normal Beepy work must be performed on development."
+elif [[ "$healthy" == NO ]]; then
+    safe=NO
+    reason="Repository integrity checking failed; ask for assistance."
+elif [[ "$conflicts" != 0 ]]; then
+    safe=NO
+    reason="Conflicts require a human decision; ask for assistance."
+elif [[ "$operation" != none ]]; then
+    safe=NO
+    reason="A Git $operation operation is in progress; ask for assistance."
+elif [[ "$identity_state" == missing ]]; then
+    reason="development is ready for editing; configure Git identity before saving."
+elif [[ "$identity_usable" == NO ]]; then
+    reason="development is ready for editing; the reserved archival/migration identity must be replaced before saving."
+else
+    reason="development is ready for normal Beepy work."
+fi
+
+cat <<EOF
+Repository:
+$BEEPY_REPO_ROOT
+
+Current branch:
+$branch
+
+Expected working branch:
+development
+
+Working tree:
+$working_tree
+
+Staged changes:
+$staged
+
+Unstaged changes:
+$unstaged
+
+Untracked files:
+$untracked
+
+Git identity:
+$identity_state
+
+Configured identity:
+$identity_display
+
+Upstream:
+$upstream
+
+Ahead:
+$ahead
+
+Behind:
+$behind
+
+Operation in progress:
+$operation
+
+Conflicts:
+$conflicts
+
+Safe to work:
+$safe
+
+Reason:
+$reason
+
+Remote comparison uses the last fetched Git state.
+Run beepy-sync to safely check for remote updates.
+EOF

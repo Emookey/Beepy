@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export GIT_PAGER=cat
+export PAGER=cat
+export GIT_OPTIONAL_LOCKS=0
+
+SCRIPT_PATH=$(readlink -f -- "${BASH_SOURCE[0]}")
+SCRIPT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
+# shellcheck source=lib/beepy-git-common.sh
+source "$SCRIPT_DIR/lib/beepy-git-common.sh"
+
+usage() {
+    cat <<'EOF'
+Usage: beepy-save [--dry-run] [--help]
+
+Safe checkpoint workflow for the development branch only. It reviews paths,
+blocks sensitive paths, stages only after confirmation, commits only after a
+second confirmation, and offers a normal push after a separate confirmation.
+
+--dry-run  Inspect safety and show what would happen without staging,
+           committing, pushing, or otherwise changing the repository.
+
+This helper never force pushes, rewrites history, switches branches, or
+modifies main.
+EOF
+}
+
+dry_run=0
+if (( $# > 1 )); then
+    usage >&2
+    exit 2
+fi
+if (( $# == 1 )); then
+    case $1 in
+        --help|-h) usage; exit 0 ;;
+        --dry-run) dry_run=1 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+fi
+
+beepy_require_repository
+cd -- "$BEEPY_REPO_ROOT"
+beepy_guard_mutating_state
+beepy_load_identity
+
+declare -a candidate_paths=()
+declare -A seen_paths=()
+
+add_candidate_path() {
+    local path=$1
+    if [[ -z ${seen_paths["$path"]+present} ]]; then
+        candidate_paths+=("$path")
+        seen_paths["$path"]=1
+    fi
+}
+
+while IFS= read -r -d '' path; do add_candidate_path "$path"; done < <(git --no-pager diff --name-only -z --)
+while IFS= read -r -d '' path; do add_candidate_path "$path"; done < <(git --no-pager diff --cached --name-only -z --)
+while IFS= read -r -d '' path; do add_candidate_path "$path"; done < <(git ls-files --others --exclude-standard -z --)
+
+if (( ${#candidate_paths[@]} == 0 )); then
+    printf '%s\n' "There are no tracked or untracked changes to save."
+    exit 0
+fi
+
+path_is_sensitive() {
+    local path=$1 lower base
+    lower=${path,,}
+    base=${lower##*/}
+
+    [[ "$base" == .env.example ]] && return 1
+
+    case "/$lower/" in
+        */secrets/*|*/secret/*|*/credentials/*|*/credential/*|*/tokens/*|*/token/*|\
+        */client-data/*|*/client_data/*|*/customer-data/*|*/customer_data/*|\
+        */email-exports/*|*/email_exports/*|*/mail-exports/*|*/mail_exports/*|\
+        */backups/*|*/backup/*) return 0 ;;
+    esac
+    case "$base" in
+        .env|.env.*|*.pem|*.key|*.p12|*.pfx|*.ppk|id_rsa|id_ed25519|\
+        *credential*|*credentials*|*token*|*private-key*|*private_key*|\
+        *client-data*|*client_data*|*customer-data*|*customer_data*|\
+        *email-export*|*email_export*|*mail-export*|*mail_export*|\
+        *.sql|*.sql.gz|*.dump|*.sqlite|*.sqlite3|*.db|\
+        *.bak|*.backup|*.before-*|*.before_*|*.zip|*.tar|*.tar.gz|*.tgz|*.7z|*.rar)
+            return 0 ;;
+    esac
+    return 1
+}
+
+declare -a blocked_paths=()
+for path in "${candidate_paths[@]}"; do
+    if path_is_sensitive "$path"; then
+        blocked_paths+=("$path")
+    fi
+done
+
+if (( ${#blocked_paths[@]} > 0 )); then
+    printf '%s\n' "STOP: Sensitive or publication-unsafe candidate paths were found." >&2
+    printf '%s\n' "Nothing was staged. File contents were not inspected." >&2
+    printf '\n%s\n' "Blocked paths:" >&2
+    for path in "${blocked_paths[@]}"; do
+        printf '  %q\n' "$path" >&2
+    done
+    printf '\n%s\n' "This beginner helper has no bypass. Ask for expert assistance if a blocked path is intentional." >&2
+    exit 1
+fi
+
+printf '%s\n' "Changes Git currently sees:"
+git -c core.quotePath=true --no-pager status --short --untracked-files=all
+
+printf '\n%s\n' "Tracked change summary:"
+if git --no-pager diff --stat HEAD -- | grep -q .; then
+    git --no-pager diff --stat HEAD --
+else
+    printf '%s\n' "(no tracked file changes)"
+fi
+
+printf '\n%s\n' "Untracked files (new files):"
+untracked_found=0
+while IFS= read -r -d '' path; do
+    printf '  %q\n' "$path"
+    untracked_found=1
+done < <(git ls-files --others --exclude-standard -z --)
+if (( untracked_found == 0 )); then
+    printf '%s\n' "(none)"
+fi
+
+printf '\n%s\n' "Paths that would be selected for the checkpoint:"
+for path in "${candidate_paths[@]}"; do
+    printf '  %q\n' "$path"
+done
+
+cat <<EOF
+
+Staging means selecting changes for the next commit.
+It does not upload anything.
+
+This commit will be attributed to:
+$BEEPY_IDENTITY_NAME <$BEEPY_IDENTITY_EMAIL>
+EOF
+
+if (( dry_run == 1 )); then
+    cat <<'EOF'
+
+DRY RUN: No repository changes will be made.
+
+The full workflow would:
+1. Ask before running: git add --all -- .
+2. Show the staged summary.
+3. Ask for a commit message and final commit confirmation.
+4. Run a normal git commit with identity fallback disabled.
+5. Ask separately whether to push development to origin/development.
+
+The working tree would not be rewritten. Staging would update the Git index.
+Committing would add local history. Only a separately confirmed normal push
+would update origin/development. main would remain unchanged.
+
+Dry-run complete. Nothing was staged, committed, or pushed.
+EOF
+    exit 0
+fi
+
+if ! beepy_confirm "Continue with this identity and stage all reviewed changes? [y/N] "; then
+    printf '%s\n' "Canceled. Nothing was staged by this helper."
+    exit 0
+fi
+
+printf '\n%s\n' "About to select the reviewed changes for the next checkpoint."
+printf '%s\n' "Git command:"
+printf '%s\n' "git add --all -- ."
+beepy_print_effects "unchanged" "updated with all reviewed changes" "unchanged" "unchanged"
+git add --all -- .
+
+printf '\n%s\n' "Staged summary:"
+git --no-pager diff --cached --stat --
+printf '\n%s\n' "Staged paths:"
+git -c core.quotePath=true --no-pager diff --cached --name-status --
+
+if git diff --cached --quiet --; then
+    beepy_stop "Staging produced no changes. No commit was created."
+    exit 1
+fi
+
+printf '\n%s\n' "Enter a short commit message. It becomes part of permanent Git history."
+printf '%s' "Commit message: "
+if ! IFS= read -r commit_message; then
+    beepy_stop "No commit message was received. Staged changes remain staged."
+    exit 1
+fi
+
+trimmed_message=${commit_message//[[:space:]]/}
+if [[ -z "$trimmed_message" ]]; then
+    beepy_stop "The commit message cannot be empty or only whitespace. Staged changes remain staged."
+    exit 1
+fi
+if [[ "$commit_message" == *$'\r'* || "$commit_message" == *$'\n'* ]]; then
+    beepy_stop "The commit message must be one line. Staged changes remain staged."
+    exit 1
+fi
+if (( ${#commit_message} < 3 || ${#commit_message} > 120 )); then
+    beepy_stop "Use a commit message between 3 and 120 characters. Staged changes remain staged."
+    exit 1
+fi
+
+printf '\n%s\n' "About to create a Git checkpoint from the staged changes."
+printf '%s\n' "Git command:"
+printf 'git -c user.useConfigOnly=true commit -m '
+printf '%q\n' "$commit_message"
+beepy_print_effects "unchanged" "recorded as the commit snapshot" "one normal commit added" "unchanged"
+printf '%s\n' "Commit message: $commit_message"
+
+if ! beepy_confirm "Create this local commit? [y/N] "; then
+    printf '%s\n' "Canceled. No commit was created; the reviewed changes remain staged."
+    exit 0
+fi
+
+beepy_guard_mutating_state
+beepy_load_identity
+git -c user.useConfigOnly=true commit -m "$commit_message"
+
+new_sha=$(git rev-parse HEAD)
+summary=$(git --no-pager show -s --format='%h %s' HEAD)
+cat <<EOF
+
+New local commit:
+$new_sha
+$summary
+
+Your checkpoint is now saved locally.
+No GitHub changes have happened yet.
+EOF
+
+if ! git config --get remote.origin.url >/dev/null 2>&1; then
+    printf '%s\n' "origin is not configured, so this helper cannot offer a push."
+    exit 0
+fi
+
+if ! beepy_confirm "Push this development commit to origin/development? [y/N] "; then
+    printf '%s\n' "Not pushed. The checkpoint remains local."
+    exit 0
+fi
+
+beepy_guard_mutating_state
+beepy_load_origin
+beepy_validate_development_upstream
+
+printf '\n%s\n' "About to publish local development commits to origin/development."
+printf '%s\n' "Git command:"
+printf '%s\n' "git push origin development:development"
+beepy_print_effects "unchanged" "unchanged" "unchanged" "advanced only if the push is a normal fast-forward"
+
+set +e
+push_output=$(git push origin development:development 2>&1)
+push_status=$?
+set -e
+if (( push_status != 0 )); then
+    if [[ "$push_output" == *"non-fast-forward"* || "$push_output" == *"[rejected]"* ]]; then
+        printf '%s\n' "STOP: The remote branch changed since your last sync." >&2
+        printf '%s\n' "Nothing was overwritten." >&2
+        printf '%s\n' "Run beepy-sync before trying again." >&2
+    else
+        printf '%s\n' "STOP: git push did not succeed. Nothing was force pushed or overwritten." >&2
+        printf '%s\n' "Check the remote connection with assistance before trying again." >&2
+    fi
+    exit "$push_status"
+fi
+
+printf '%s\n' "Push complete. origin/development now contains the local development commits."
