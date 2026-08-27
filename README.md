@@ -79,3 +79,7 @@ Project assistant synthesis and generative email summarization are intentionally
 ## Promotion status
 
 Static checks alone do not prove authentication, authorization, schema/data compatibility, email/ticket synchronization, model behavior, upload permissions, backup/restore, Tailscale routing, or external integration behavior. Canonical Git promotion and Kalvin Core deployment remain blocked until the handoff report's review and validation requirements are completed.
+
+## License
+
+Beepy is licensed under the GNU Affero General Public License version 3 or later (`AGPL-3.0-or-later`). See `LICENSE` for the full license terms.
